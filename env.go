@@ -4,15 +4,21 @@ package env
 
 import (
 	"bufio"
+	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"strconv"
 	"strings"
 	"unicode"
 )
 
-// Version is the current version of the env package.
-const Version = "0.0.4"
+const (
+	// Version is the current version of the env package.
+	Version = "0.0.4"
+	// MaxRecurDepth is the maximum recursion depth for nested environment variables.
+	MaxRecurDepth = 3
+)
 
 // Env represents an environment variable manager.
 // It stores environment variables in a map and supports loading from a file and the system environment.
@@ -30,17 +36,30 @@ func New() *Env {
 // If the file cannot be opened or read, the error is ignored.
 func NewWithFile(filename string) *Env {
 	env := &Env{storage: make(map[string]Entry)}
-	_ = env.Load(os.Open(filename))
+	if err := env.Load(os.Open(filename)); err != nil {
+		panic(err)
+	}
 	return env
 }
 
-// Load reads environment variables from a reader and stores them in the internal storage.
-// It skips comments (lines starting with #) and empty lines.
-// It splits each line into key-value pairs using the first '=' character.
-// It trims whitespace from keys and values and removes surrounding quotes if present.
-// If there is an error reading the file, it returns the error.
-func (e *Env) Load(reader io.ReadCloser, err error) error {
+// NewWithUrl creates a new Env instance and loads environment variables from the specified URL.
+func NewWithUrl(url string) *Env {
+	env := &Env{storage: make(map[string]Entry)}
+	res, err := http.Get(url)
+	if res != nil && res.StatusCode < 400 {
+		err = env.Load(res.Body, err)
+	} else {
+		err = fmt.Errorf("env: failed to open %s: %v", url, err)
+	}
 	if err != nil {
+		panic(err)
+	}
+	return env
+}
+
+// Load loads environment variables from a file and stores them in the internal storage.
+func (e *Env) Load(reader io.ReadCloser, err error) error {
+	if err != nil || reader == nil {
 		return err
 	}
 	// Close the file and handle any potential error
@@ -49,7 +68,15 @@ func (e *Env) Load(reader io.ReadCloser, err error) error {
 			err = closeErr
 		}
 	}()
+	return e.ScanLines(reader)
+}
 
+// ScanLines reads environment variables from a reader and stores them in the internal storage.
+// It skips comments (lines starting with #) and empty lines.
+// It splits each line into key-value pairs using the first '=' character.
+// It trims whitespace from keys and values and removes surrounding quotes if present.
+// If there is an error reading the file, it returns the error.
+func (e *Env) ScanLines(reader io.Reader) error {
 	scanner := bufio.NewScanner(reader)
 	for scanner.Scan() {
 		line := strings.TrimLeftFunc(scanner.Text(), unicode.IsSpace)
@@ -71,7 +98,7 @@ func (e *Env) Load(reader io.ReadCloser, err error) error {
 		// Remove surrounding quotes if any
 		if len(value) >= 2 {
 			firstChar, lastChar := value[0], value[len(value)-1]
-			if (firstChar == '"' && lastChar == '"') || (firstChar == '\'' && lastChar == '\'') {
+			if (firstChar == '"' || firstChar == '\'') && (firstChar == lastChar) {
 				value = value[1 : len(value)-1]
 			}
 		}
@@ -103,13 +130,19 @@ func (e *Env) Lookup(key string) (Entry, bool) {
 }
 
 // Get retrieves and expands the value of an environment variable by key.
-func (e *Env) Get(key string) string {
-	if s := e.GetStr(key); s != "" {
+func (e *Env) recurGet(key string, depth int) string {
+	s := e.GetStr(key)
+	if s != "" && depth <= MaxRecurDepth && strings.Contains(s, "$") {
 		return os.Expand(s, func(k string) string {
-			return e.GetStr(k)
+			return e.recurGet(k, depth+1)
 		})
 	}
-	return ""
+	return s
+}
+
+// Get retrieves and expands the value of an environment variable by key.
+func (e *Env) Get(key string) string {
+	return e.recurGet(key, 1)
 }
 
 // GetStr retrieves the string value of an environment variable by key.
