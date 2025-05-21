@@ -1,3 +1,3 @@
-module github.com/nathanbcrocker/env
+module github.com/azhai/go-env
 
-go 1.22
+go 1.24
