@@ -4,9 +4,7 @@ package env
 
 import (
 	"bufio"
-	"fmt"
 	"io"
-	"net/http"
 	"os"
 	"strconv"
 	"strings"
@@ -15,7 +13,7 @@ import (
 
 const (
 	// Version is the current version of the env package.
-	Version = "0.0.4"
+	Version = "0.0.5"
 	// MaxRecurDepth is the maximum recursion depth for nested environment variables.
 	MaxRecurDepth = 3
 )
@@ -37,21 +35,6 @@ func New() *Env {
 func NewWithFile(filename string) *Env {
 	env := &Env{storage: make(map[string]Entry)}
 	if err := env.Load(os.Open(filename)); err != nil {
-		panic(err)
-	}
-	return env
-}
-
-// NewWithUrl creates a new Env instance and loads environment variables from the specified URL.
-func NewWithUrl(url string) *Env {
-	env := &Env{storage: make(map[string]Entry)}
-	res, err := http.Get(url)
-	if res != nil && res.StatusCode < 400 {
-		err = env.Load(res.Body, err)
-	} else {
-		err = fmt.Errorf("env: failed to open %s: %v", url, err)
-	}
-	if err != nil {
 		panic(err)
 	}
 	return env
